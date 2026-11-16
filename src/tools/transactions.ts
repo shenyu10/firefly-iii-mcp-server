@@ -19,6 +19,19 @@ const TransactionTypeEnum = z.enum([
   "opening-balance",
 ]).describe("Transaction type");
 
+const DATE_OR_DATETIME =
+  /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+const TransactionDateSchema = z
+  .string()
+  .refine((value) => DATE_OR_DATETIME.test(value), {
+    message:
+      "Use YYYY-MM-DD, or a full ISO 8601 datetime such as 2026-11-16T12:31:50+08:00",
+  })
+  .describe(
+    "Transaction date. Pass YYYY-MM-DD, or a full ISO 8601 datetime (e.g. 2026-11-16T12:31:50+08:00) whenever the time of day is known; Firefly III stores and displays the time when one is supplied."
+  );
+
 const TransactionSplitSchema = z.object({
   amount: z.string().describe("Transaction amount as a string, e.g. '25.50'"),
   description: z.string().min(1).describe("Description of this split"),
@@ -38,7 +51,7 @@ const TransactionSplitSchema = z.object({
 const CreateTransactionSchema = z.object({
   type: TransactionTypeEnum,
   description: z.string().min(1).describe("Main transaction description"),
-  date: z.string().describe("Transaction date in YYYY-MM-DD format"),
+  date: TransactionDateSchema,
   amount: z.string().describe("Transaction amount as a string, e.g. '25.50'"),
   source_name: z.string().optional().describe("Source account name (required for withdrawals/transfers)"),
   source_id: z.string().optional().describe("Source account ID (alternative to source_name)"),
@@ -67,7 +80,9 @@ const GetTransactionSchema = z.object({
 const UpdateTransactionSchema = z.object({
   id: z.string().describe("Transaction group ID to update"),
   description: z.string().optional().describe("Updated description"),
-  date: z.string().optional().describe("Updated date (YYYY-MM-DD)"),
+  date: TransactionDateSchema.optional().describe(
+    "Updated date. YYYY-MM-DD, or a full ISO 8601 datetime (e.g. 2026-11-16T12:31:50+08:00) to set the time of day."
+  ),
   amount: z.string().optional().describe("Updated amount"),
   source_name: z.string().optional().describe("Updated source account name"),
   destination_name: z.string().optional().describe("Updated destination account name"),
@@ -110,6 +125,12 @@ interface FireflyTransaction {
   };
 }
 
+function formatDate(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?/.exec(value);
+  if (!match) return value.slice(0, 10);
+  return `${match[1]} ${match[2]}${match[3] ?? ""}`;
+}
+
 function formatTransaction(tx: FireflyTransaction): string {
   const attrs = tx.attributes;
   const lines: string[] = [];
@@ -119,7 +140,7 @@ function formatTransaction(tx: FireflyTransaction): string {
   for (const split of attrs.transactions) {
     lines.push(`- **${split.type}**: ${split.currency_symbol}${split.amount}`);
     lines.push(`  ${split.source_name} → ${split.destination_name}`);
-    lines.push(`  Date: ${split.date.slice(0, 10)}`);
+    lines.push(`  Date: ${formatDate(split.date)}`);
     if (split.category_name) lines.push(`  Category: ${split.category_name}`);
     if (split.budget_name) lines.push(`  Budget: ${split.budget_name}`);
     if (split.tags?.length) lines.push(`  Tags: ${split.tags.join(", ")}`);
@@ -146,6 +167,8 @@ For a deposit: provide source_name (revenue account, e.g. "Employer") and destin
 For a transfer: both source and destination should be your own asset accounts.
 
 If an expense/revenue account doesn't exist yet, Firefly III will auto-create it.
+
+Pass a full ISO 8601 datetime (e.g. "2026-11-16T12:31:50+08:00") when the time of day is known. A bare YYYY-MM-DD is stored as 00:00:00.
 
 Returns: The created transaction with its ID.`,
       inputSchema: CreateTransactionSchema,
@@ -323,7 +346,9 @@ Returns a paginated list of transactions with key details.`,
       title: "Update Firefly III Transaction",
       description: `Update an existing transaction. Only provide the fields you want to change.
 
-First use firefly_get_transaction to retrieve the current values, then pass only the changed fields here.`,
+First use firefly_get_transaction to retrieve the current values, then pass only the changed fields here.
+
+Pass date as a full ISO 8601 datetime (e.g. "2026-11-16T12:31:50+08:00") when you need to set the time of day; a bare YYYY-MM-DD stores 00:00:00.`,
       inputSchema: UpdateTransactionSchema,
       annotations: {
         readOnlyHint: false,
