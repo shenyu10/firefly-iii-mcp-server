@@ -193,7 +193,12 @@ Returns: The created transaction with its ID.`,
             error_if_duplicate_hash: false,
             apply_rules: true,
             fire_webhooks: true,
-            group_title: params.description,
+            // Only real split transactions need a group title. Sending one for a
+            // single-journal transaction makes Firefly III's web UI render it as
+            // a split transaction, even though it holds exactly one journal.
+            ...(transactions.length > 1
+              ? { group_title: params.description }
+              : {}),
             transactions,
           }
         );
